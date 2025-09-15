@@ -5,6 +5,7 @@ import csvParser from 'csv-parser'; // for parsing CSV files
 import fs from "fs";
 import path from 'path';
 // fs and path used to read the file and delete after processing
+import {Parser} from 'json2csv'; // for converting JSON to CSV
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -43,9 +44,6 @@ interface Lead {
   location: string;
   linkedin_bio: string;
 }
-
-
-
 
 
 // post API - to accept the offer from the client
@@ -119,5 +117,66 @@ app.post('/leads/upload', upload.single("file"), async (req: Request, res: Respo
   catch (error) {
     console.error('Error parsing CSV file:', error);
     return res.status(500).json({ error: 'Error parsing CSV file' });
+  }
+})
+
+
+
+
+
+
+// output APIs
+
+interface Result {
+  name: string;
+  role: string;
+  company: string;
+  intent: string;
+  score: number;
+  reasoning: string;
+}
+
+
+const results: Result[] = [
+  {
+    name: "Ava Patel",
+    role: "Head of Growth",
+    company: "FlowMetrics",
+    intent: "High",
+    score: 85,
+    reasoning: "Fits ICP SaaS mid-market and role is decision maker."
+  },
+  {
+    name: "John Doe",
+    role: "CTO",
+    company: "TechNova",
+    intent: "Medium",
+    score: 70,
+    reasoning: "Relevant role but company size is smaller than ICP."
+  }
+];
+
+
+
+// GET - /results - returns the JSON array
+app.get('/results', async (req: Request, res: Response) => {
+  res.json(results);
+})
+
+// export results as a CSV file
+app.get('/results/export', async (req: Request, res: Response) => {
+  try {
+    const fields = ['name', 'role', 'company', 'intent', 'score', 'reasoning']; // fields to export
+    const parser = new Parser({ fields }); // 
+    const csv = parser.parse(results); // convert JSON to CSV
+
+
+    res.setHeader('Content-Type', 'text/csv'); // set the content type to CSV
+    res.attachment('results.csv'); // attachment is the filename of the CSV file
+    res.status(200).send(csv); // send CSV to client
+  }
+  catch (error) {
+    console.error('Error exporting results:', error);
+    return res.status(500).json({ error: 'Error exporting results' });
   }
 })

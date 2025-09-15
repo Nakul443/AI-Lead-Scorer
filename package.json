@@ -4,11 +4,13 @@
     "csv-parse": "^6.1.0",
     "csv-parser": "^3.2.0",
     "express": "^5.1.0",
+    "json2csv": "^6.0.0-alpha.2",
     "multer": "^2.0.2",
     "node": "^24.8.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
+    "@types/json2csv": "^5.0.7",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.4.0",
     "nodemon": "^3.1.10",
