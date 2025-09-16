@@ -45,25 +45,6 @@ let offerDetails = {
     ideal_use_cases: []
 }; // to store the offer details
 let uploadedLeads = []; // to store uploaded leads
-let results = [
-    {
-        name: "Ava Patel",
-        role: "Head of Growth",
-        company: "FlowMetrics",
-        intent: "High",
-        score: 85,
-        reasoning: "Fits ICP SaaS mid-market and role is decision maker."
-    },
-    {
-        name: "John Doe",
-        role: "CTO",
-        company: "TechNova",
-        intent: "Medium",
-        score: 70,
-        reasoning: "Relevant role but company size is smaller than ICP."
-    }
-];
-let leadResults = []; // to store the results after scoring
 // post API - to accept the offer from the client
 app.post('/offer', async (req, res) => {
     const { name, value_props, ideal_use_cases } = req.body;
@@ -292,7 +273,6 @@ app.post('/score', async (req, res) => {
             score: finalScore,
             reasoning: aiReasoning
         };
-        results.push(response); // store in global results array
         return response; // return for map function
     }));
     calculatedResult = finalResults;
@@ -300,14 +280,14 @@ app.post('/score', async (req, res) => {
 });
 // GET - /results - returns the JSON array
 app.get('/results', async (req, res) => {
-    res.json(calculatedResult);
+    res.json(calculatedResult || []);
 });
 // export results as a CSV file
 app.get('/results/export', async (req, res) => {
     try {
         const fields = ['name', 'role', 'company', 'intent', 'score', 'reasoning']; // fields to export
         const parser = new json2csv_1.Parser({ fields });
-        const csv = parser.parse(results); // convert JSON to CSV
+        const csv = parser.parse(calculatedResult || []); // convert JSON to CSV
         res.setHeader('Content-Type', 'text/csv'); // set the content type to CSV
         res.attachment('results.csv'); // attachment is the filename of the CSV file
         res.status(200).send(csv); // send CSV to client
