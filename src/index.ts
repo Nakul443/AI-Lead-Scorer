@@ -186,7 +186,7 @@ app.post('/leads/upload', upload.single("file"), async (req: Request, res: Respo
 
 
 // scoring logic
-async function scoreLeadWithRules(lead: Lead): Promise<Result> {
+async function scoreLeadWithRules(lead: Lead): Promise<Number> {
   let score = 0;
   let reasons: string[] = []; // to collect explanation for each scoring
 
@@ -238,18 +238,18 @@ async function scoreLeadWithRules(lead: Lead): Promise<Result> {
     intent = "Low";
   }
 
-  return {
-    name: lead.name,
-    role: lead.role,
-    company: lead.company,
-    intent,
-    score,
-    reasoning: reasons.join(" ")
-  };
+  return score;
+
+    // name: lead.name,
+    // role: lead.role,
+    // company: lead.company,
+    // intent,
+    // score,
+    // reasoning: reasons.join(" ")
 };
 
 // AI based scoring
-async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<Result> {
+async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<any> {
   const prompt = `
     You are a lead scoring AI assistant. Given a lead's details and an offer, score the lead's intent to purchase the offer on a scale of 0-100. 
     Provide reasoning for the score based on the lead's role, company, industry, location, and LinkedIn bio.
@@ -277,7 +277,6 @@ async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<Result>
       "reasoning": "<Detailed reasoning for the score>"
     }
   `;
-  console.log(prompt);
   try {
     const response = await genai.models.generateContent({
       model: 'gemini-2.0-flash',
@@ -295,8 +294,6 @@ async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<Result>
     // parses JSON string into a javascript object
     // jsonMatch[0] contains the matched JSON string
 
-    console.log('Parsed AI result:', aiResult);
-
     let aiPoints: number;
     let intent: "High" | "Medium" | "Low";
 
@@ -312,27 +309,29 @@ async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<Result>
       intent = "Low";
     }
 
-
-    return {
-      name: aiResult.name || lead.name,
-      role: aiResult.role || lead.role,
-      company: aiResult.company || lead.company, intent,
-      score: aiPoints,
-      reasoning: aiResult.reasoning || "AI scoring completed"
-    };
+    return {aiPoints, reasoning: aiResult.reasoning, intent};
+    // return {
+    //   name: aiResult.name || lead.name,
+    //   role: aiResult.role || lead.role,
+    //   company: aiResult.company || lead.company, intent,
+    //   score: aiPoints,
+    //   reasoning: aiResult.reasoning || "AI scoring completed"
+    // };
   } catch (error) {
     console.error('Error during AI scoring:', error);
-    return {
-      name: lead.name,
-      role: lead.role,
-      company: lead.company,
-      intent: "Low",
-      score: 0,
-      reasoning: "Error in AI processing."
-    };
+    throw new Error('Error during AI scoring');
+    // return {
+    //   name: lead.name,
+    //   role: lead.role,
+    //   company: lead.company,
+    //   intent: "Low",
+    //   score: 0,
+    //   reasoning: "Error in AI processing."
+    // };
   }
 }
 
+let calculatedResult: any;
 // transforms uploaded leads to results and runs the scoring logic
 app.post('/score', async (req: Request, res: Response) => {
   if (uploadedLeads.length === 0) {
@@ -340,18 +339,41 @@ app.post('/score', async (req: Request, res: Response) => {
   }
 
   // results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithRules(lead))); // score every lead
-  results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithAI(lead, offerDetails))); // score every lead
+  // const AIresults = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithAI(lead, offerDetails))); // score every lead
+  // const ruleResults = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithRules(lead))); // score every lead
 
-  return res.status(200).json({
-    message: 'Scoring completed',
-    results
-  });
+  const finalResults = await Promise.all(
+    uploadedLeads.map(async (lead) => {
+      const aiResult = await scoreLeadWithAI(lead, offerDetails);
+      const aiScore = aiResult.aiPoints;
+      const aiReasoning = aiResult.reasoning;
+      const aiIntent = aiResult.intent;
+      const ruleScore = await scoreLeadWithRules(lead);
+  
+      let finalScore: number = aiScore + ruleScore;
+  
+      const response = {
+        name: lead.name,
+        role: lead.role,
+        company: lead.company,
+        intent: aiIntent,
+        score: finalScore,
+        reasoning: aiReasoning
+      };
+  
+      results.push(response); // store in global results array
+      return response; // return for map function
+    })
+  );
+  
+  calculatedResult = finalResults;
+  res.end();
 });
 
 
 // GET - /results - returns the JSON array
 app.get('/results', async (req: Request, res: Response) => {
-  res.json(results);
+  res.json(calculatedResult);
 });
 
 // export results as a CSV file

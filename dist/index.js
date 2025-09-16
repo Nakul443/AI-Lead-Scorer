@@ -179,14 +179,13 @@ async function scoreLeadWithRules(lead) {
     else {
         intent = "Low";
     }
-    return {
-        name: lead.name,
-        role: lead.role,
-        company: lead.company,
-        intent,
-        score,
-        reasoning: reasons.join(" ")
-    };
+    return score;
+    // name: lead.name,
+    // role: lead.role,
+    // company: lead.company,
+    // intent,
+    // score,
+    // reasoning: reasons.join(" ")
 }
 ;
 // AI based scoring
@@ -218,7 +217,6 @@ async function scoreLeadWithAI(lead, offerDetails) {
       "reasoning": "<Detailed reasoning for the score>"
     }
   `;
-    console.log(prompt);
     try {
         const response = await genai.models.generateContent({
             model: 'gemini-2.0-flash',
@@ -233,7 +231,6 @@ async function scoreLeadWithAI(lead, offerDetails) {
         const aiResult = JSON.parse(jsonMatch[0]); // parse the JSON string to an object
         // parses JSON string into a javascript object
         // jsonMatch[0] contains the matched JSON string
-        console.log('Parsed AI result:', aiResult);
         let aiPoints;
         let intent;
         // Map score to intent if not provided
@@ -249,41 +246,61 @@ async function scoreLeadWithAI(lead, offerDetails) {
             aiPoints = 10;
             intent = "Low";
         }
-        return {
-            name: aiResult.name || lead.name,
-            role: aiResult.role || lead.role,
-            company: aiResult.company || lead.company, intent,
-            score: aiPoints,
-            reasoning: aiResult.reasoning || "AI scoring completed"
-        };
+        return { aiPoints, reasoning: aiResult.reasoning, intent };
+        // return {
+        //   name: aiResult.name || lead.name,
+        //   role: aiResult.role || lead.role,
+        //   company: aiResult.company || lead.company, intent,
+        //   score: aiPoints,
+        //   reasoning: aiResult.reasoning || "AI scoring completed"
+        // };
     }
     catch (error) {
         console.error('Error during AI scoring:', error);
-        return {
-            name: lead.name,
-            role: lead.role,
-            company: lead.company,
-            intent: "Low",
-            score: 0,
-            reasoning: "Error in AI processing."
-        };
+        throw new Error('Error during AI scoring');
+        // return {
+        //   name: lead.name,
+        //   role: lead.role,
+        //   company: lead.company,
+        //   intent: "Low",
+        //   score: 0,
+        //   reasoning: "Error in AI processing."
+        // };
     }
 }
+let calculatedResult;
 // transforms uploaded leads to results and runs the scoring logic
 app.post('/score', async (req, res) => {
     if (uploadedLeads.length === 0) {
         return res.status(400).json({ error: 'No leads uploaded to score. Upload CSV first' });
     }
     // results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithRules(lead))); // score every lead
-    results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithAI(lead, offerDetails))); // score every lead
-    return res.status(200).json({
-        message: 'Scoring completed',
-        results
-    });
+    // const AIresults = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithAI(lead, offerDetails))); // score every lead
+    // const ruleResults = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithRules(lead))); // score every lead
+    const finalResults = await Promise.all(uploadedLeads.map(async (lead) => {
+        const aiResult = await scoreLeadWithAI(lead, offerDetails);
+        const aiScore = aiResult.aiPoints;
+        const aiReasoning = aiResult.reasoning;
+        const aiIntent = aiResult.intent;
+        const ruleScore = await scoreLeadWithRules(lead);
+        let finalScore = aiScore + ruleScore;
+        const response = {
+            name: lead.name,
+            role: lead.role,
+            company: lead.company,
+            intent: aiIntent,
+            score: finalScore,
+            reasoning: aiReasoning
+        };
+        results.push(response); // store in global results array
+        return response; // return for map function
+    }));
+    calculatedResult = finalResults;
+    res.end();
 });
 // GET - /results - returns the JSON array
 app.get('/results', async (req, res) => {
-    res.json(results);
+    res.json(calculatedResult);
 });
 // export results as a CSV file
 app.get('/results/export', async (req, res) => {
