@@ -5,7 +5,14 @@ import csvParser from 'csv-parser'; // for parsing CSV files
 import fs from "fs";
 import path from 'path';
 // fs and path used to read the file and delete after processing
-import {Parser} from 'json2csv'; // for converting JSON to CSV
+import { Parser } from 'json2csv'; // for converting JSON to CSV
+import dotenv from 'dotenv';
+
+import { GoogleGenAI } from "@google/genai";
+
+dotenv.config(); // Load environment variables from .env file
+
+const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -39,6 +46,17 @@ const upload = multer({
 });
 
 
+// interfaces
+
+interface Result {
+  name: string;
+  role: string;
+  company: string;
+  intent: "High" | "Medium" | "Low";
+  score: number;
+  reasoning: string;
+}
+
 // defining the structure of a 'Lead' object
 interface Lead {
   name: string;
@@ -49,6 +67,43 @@ interface Lead {
   linkedin_bio: string;
 }
 
+interface Offer {
+  name: string;
+  value_props: string[];
+  ideal_use_cases: string[];
+}
+
+// variables
+
+let offerDetails: Offer = {
+  name: '',
+  value_props: [],
+  ideal_use_cases: []
+}; // to store the offer details
+
+let uploadedLeads: Lead[] = []; // to store uploaded leads
+
+let results: Result[] = [
+  {
+    name: "Ava Patel",
+    role: "Head of Growth",
+    company: "FlowMetrics",
+    intent: "High",
+    score: 85,
+    reasoning: "Fits ICP SaaS mid-market and role is decision maker."
+  },
+  {
+    name: "John Doe",
+    role: "CTO",
+    company: "TechNova",
+    intent: "Medium",
+    score: 70,
+    reasoning: "Relevant role but company size is smaller than ICP."
+  }
+];
+
+let leadResults: Result[] = []; // to store the results after scoring
+
 
 // post API - to accept the offer from the client
 app.post('/offer', async (req: Request, res: Response) => {
@@ -58,26 +113,23 @@ app.post('/offer', async (req: Request, res: Response) => {
   if (!name || typeof name !== 'string') {
     return res.status(400).json({ error: 'name is required and must be a string' });
   }
-  
+
   if (!Array.isArray(value_props)) {
     return res.status(400).json({ error: 'value_props must be an array' });
   }
-  
+
   if (!Array.isArray(ideal_use_cases)) {
     return res.status(400).json({ error: 'ideal_use_cases must be an array' });
   }
 
   console.log('Offer received:', { name, value_props, ideal_use_cases });
-  
-  res.status(201).json({ 
+  offerDetails = { name, value_props, ideal_use_cases }; // store the values in memory
+
+  res.status(201).json({
     message: 'Offer received successfully',
     offer: { name, value_props, ideal_use_cases }
   });
 });
-
-
-let uploadedLeads: Lead[] = []; // to store uploaded leads
-
 
 // post API - accept a CSV file with columns : name,role,company,industry,location,linkedin_bio
 app.post('/leads/upload', upload.single("file"), async (req: Request, res: Response) => {
@@ -130,44 +182,11 @@ app.post('/leads/upload', upload.single("file"), async (req: Request, res: Respo
 });
 
 
-
-
 // output APIs
 
-interface Result {
-  name: string;
-  role: string;
-  company: string;
-  intent: "High" | "Medium" | "Low";
-  score: number;
-  reasoning: string;
-}
-
-
-let results: Result[] = [
-  {
-    name: "Ava Patel",
-    role: "Head of Growth",
-    company: "FlowMetrics",
-    intent: "High",
-    score: 85,
-    reasoning: "Fits ICP SaaS mid-market and role is decision maker."
-  },
-  {
-    name: "John Doe",
-    role: "CTO",
-    company: "TechNova",
-    intent: "Medium",
-    score: 70,
-    reasoning: "Relevant role but company size is smaller than ICP."
-  }
-];
-
-
-let leadResults: Result[] = []; // to store the results after scoring
 
 // scoring logic
-function scoreLead(lead: Lead): Result {
+async function scoreLeadWithRules(lead: Lead): Promise<Result> {
   let score = 0;
   let reasons: string[] = []; // to collect explanation for each scoring
 
@@ -199,7 +218,7 @@ function scoreLead(lead: Lead): Result {
 
   // 3 - data completeness
   const allFieldsPresent = lead.name && lead.role && lead.company && lead.industry && lead.location && lead.linkedin_bio;
-  
+
   if (allFieldsPresent) {
     score += 10;
     reasons.push("All fields complete (+10).");
@@ -229,6 +248,90 @@ function scoreLead(lead: Lead): Result {
   };
 };
 
+// AI based scoring
+async function scoreLeadWithAI(lead: Lead, offerDetails: Offer): Promise<Result> {
+  const prompt = `
+    You are a lead scoring AI assistant. Given a lead's details and an offer, score the lead's intent to purchase the offer on a scale of 0-100. 
+    Provide reasoning for the score based on the lead's role, company, industry, location, and LinkedIn bio.
+
+    Lead Details:
+    Name: ${lead.name}
+    Role: ${lead.role}
+    Company: ${lead.company}
+    Industry: ${lead.industry}
+    Location: ${lead.location}
+    LinkedIn Bio: ${lead.linkedin_bio}
+
+    Offer Details:
+    Name: ${offerDetails.name}
+    Value Propositions: ${offerDetails.value_props.join(", ")}
+    Ideal Use Cases: ${offerDetails.ideal_use_cases.join(", ")}
+
+    Return the result in the following JSON format:
+    {
+      "name": "$<Lead Name>",
+      "role": "$<Lead Role>",
+      "company": "$<Lead Company>",
+      "intent": "<High|Medium|Low>",
+      "score": "number between 0-100",
+      "reasoning": "<Detailed reasoning for the score>"
+    }
+  `;
+  console.log(prompt);
+  try {
+    const response = await genai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+    });
+    // console.log('AI response:', response.text);
+
+    const text = response.text; // extract the text from the response
+    const jsonMatch = text?.match(/\{[\s\S]*\}/); // regex to find JSON in the text, extract JSON from the response
+    if (!jsonMatch) {
+      throw new Error('No JSON found in AI response');
+    }
+
+    const aiResult = JSON.parse(jsonMatch[0]); // parse the JSON string to an object
+    // parses JSON string into a javascript object
+    // jsonMatch[0] contains the matched JSON string
+
+    console.log('Parsed AI result:', aiResult);
+
+    let aiPoints: number;
+    let intent: "High" | "Medium" | "Low";
+
+    // Map score to intent if not provided
+    if (aiResult.intent === "High") {
+      aiPoints = 50;
+      intent = "High";
+    } else if (aiResult.intent === "Medium") {
+      aiPoints = 30;
+      intent = "Medium";
+    } else {
+      aiPoints = 10;
+      intent = "Low";
+    }
+
+
+    return {
+      name: aiResult.name || lead.name,
+      role: aiResult.role || lead.role,
+      company: aiResult.company || lead.company, intent,
+      score: aiPoints,
+      reasoning: aiResult.reasoning || "AI scoring completed"
+    };
+  } catch (error) {
+    console.error('Error during AI scoring:', error);
+    return {
+      name: lead.name,
+      role: lead.role,
+      company: lead.company,
+      intent: "Low",
+      score: 0,
+      reasoning: "Error in AI processing."
+    };
+  }
+}
 
 // transforms uploaded leads to results and runs the scoring logic
 app.post('/score', async (req: Request, res: Response) => {
@@ -236,7 +339,8 @@ app.post('/score', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'No leads uploaded to score. Upload CSV first' });
   }
 
-  results = uploadedLeads.map((lead) => scoreLead(lead)); // score every lead
+  // results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithRules(lead))); // score every lead
+  results = await Promise.all(uploadedLeads.map((lead) => scoreLeadWithAI(lead, offerDetails))); // score every lead
 
   return res.status(200).json({
     message: 'Scoring completed',
@@ -254,7 +358,7 @@ app.get('/results', async (req: Request, res: Response) => {
 app.get('/results/export', async (req: Request, res: Response) => {
   try {
     const fields = ['name', 'role', 'company', 'intent', 'score', 'reasoning']; // fields to export
-    const parser = new Parser({ fields }); // 
+    const parser = new Parser({ fields });
     const csv = parser.parse(results); // convert JSON to CSV
 
 
