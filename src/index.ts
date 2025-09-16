@@ -20,6 +20,9 @@ app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
 });
 
+
+
+
 // configure multer for file uploads
 const upload = multer({
   dest: 'uploads/', // for temporary storage of the uploaded file
@@ -34,6 +37,7 @@ const upload = multer({
     }
   }
 });
+
 
 // defining the structure of a 'Lead' object
 interface Lead {
@@ -71,6 +75,10 @@ app.post('/offer', async (req: Request, res: Response) => {
   });
 });
 
+
+let uploadedLeads: Lead[] = []; // to store uploaded leads
+
+
 // post API - accept a CSV file with columns : name,role,company,industry,location,linkedin_bio
 app.post('/leads/upload', upload.single("file"), async (req: Request, res: Response) => {
   // upload.single("file") - uploads a single file with the name "file", middleware
@@ -105,6 +113,7 @@ app.post('/leads/upload', upload.single("file"), async (req: Request, res: Respo
     // when parsing finishes, delete the file and return the leads
     stream.on('end', () => {
       fs.unlinkSync(filePath); // delete the uploaded file after processing
+      uploadedLeads = leads; // store the uploaded leads in memory
       res.status(200).json({ message: 'CSV file processed successfully', leads });
     });
 
@@ -118,9 +127,7 @@ app.post('/leads/upload', upload.single("file"), async (req: Request, res: Respo
     console.error('Error parsing CSV file:', error);
     return res.status(500).json({ error: 'Error parsing CSV file' });
   }
-})
-
-
+});
 
 
 
@@ -131,13 +138,13 @@ interface Result {
   name: string;
   role: string;
   company: string;
-  intent: string;
+  intent: "High" | "Medium" | "Low";
   score: number;
   reasoning: string;
 }
 
 
-const results: Result[] = [
+let results: Result[] = [
   {
     name: "Ava Patel",
     role: "Head of Growth",
@@ -157,11 +164,91 @@ const results: Result[] = [
 ];
 
 
+let leadResults: Result[] = []; // to store the results after scoring
+
+// scoring logic
+function scoreLead(lead: Lead): Result {
+  let score = 0;
+  let reasons: string[] = []; // to collect explanation for each scoring
+
+  // 1 - Role relevance
+  if (/chief|head|director|vp/i.test(lead.role)) {
+    // if role contains these keywords -> decision maker
+    score += 20;
+    reasons.push("Role is a decision maker (+20).");
+  }
+  else if (/manager|lead|senior/i.test(lead.role)) {
+    // if role contains these keywords → influencer
+    score += 10;
+    reasons.push("Role is an influencer (+10).");
+  }
+  else {
+    reasons.push("Role has low decision influence (+0).");
+  }
+
+  // 2 - industry match
+  if (/saas|software|tech/i.test(lead.industry)) {
+    score += 20;
+    reasons.push("Industry is an exact ICP match (+20).");
+  } else if (/marketing|consulting|services/i.test(lead.industry)) {
+    score += 10;
+    reasons.push("Industry is adjacent to ICP (+10).");
+  } else {
+    reasons.push("Industry outside ICP (+0).");
+  }
+
+  // 3 - data completeness
+  const allFieldsPresent = lead.name && lead.role && lead.company && lead.industry && lead.location && lead.linkedin_bio;
+  
+  if (allFieldsPresent) {
+    score += 10;
+    reasons.push("All fields complete (+10).");
+  } else {
+    reasons.push("Missing fields, no completeness bonus (+0).");
+  }
+
+  // intent label according to score
+  let intent: "High" | "Medium" | "Low";
+  if (score >= 40) {
+    intent = "High";
+  }
+  else if (score >= 25) {
+    intent = "Medium";
+  }
+  else {
+    intent = "Low";
+  }
+
+  return {
+    name: lead.name,
+    role: lead.role,
+    company: lead.company,
+    intent,
+    score,
+    reasoning: reasons.join(" ")
+  };
+};
+
+
+// transforms uploaded leads to results and runs the scoring logic
+app.post('/score', async (req: Request, res: Response) => {
+  if (uploadedLeads.length === 0) {
+    return res.status(400).json({ error: 'No leads uploaded to score. Upload CSV first' });
+  }
+
+  results = uploadedLeads.map((lead) => scoreLead(lead)); // score every lead
+
+  return res.status(200).json({
+    message: 'Scoring completed',
+    results
+  });
+});
+
 
 // GET - /results - returns the JSON array
 app.get('/results', async (req: Request, res: Response) => {
   res.json(results);
-})
+});
 
 // export results as a CSV file
 app.get('/results/export', async (req: Request, res: Response) => {
@@ -179,4 +266,4 @@ app.get('/results/export', async (req: Request, res: Response) => {
     console.error('Error exporting results:', error);
     return res.status(500).json({ error: 'Error exporting results' });
   }
-})
+});

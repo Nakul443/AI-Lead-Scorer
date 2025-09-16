@@ -10,6 +10,7 @@ const csv_parser_1 = __importDefault(require("csv-parser")); // for parsing CSV 
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 // fs and path used to read the file and delete after processing
+const json2csv_1 = require("json2csv"); // for converting JSON to CSV
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3000;
 app.use(express_1.default.json());
@@ -52,6 +53,7 @@ app.post('/offer', async (req, res) => {
         offer: { name, value_props, ideal_use_cases }
     });
 });
+let uploadedLeads = []; // to store uploaded leads
 // post API - accept a CSV file with columns : name,role,company,industry,location,linkedin_bio
 app.post('/leads/upload', upload.single("file"), async (req, res) => {
     // upload.single("file") - uploads a single file with the name "file", middleware
@@ -82,6 +84,7 @@ app.post('/leads/upload', upload.single("file"), async (req, res) => {
         // when parsing finishes, delete the file and return the leads
         stream.on('end', () => {
             fs_1.default.unlinkSync(filePath); // delete the uploaded file after processing
+            uploadedLeads = leads; // store the uploaded leads in memory
             res.status(200).json({ message: 'CSV file processed successfully', leads });
         });
         // if parsing fails, delete the file and return an error
@@ -93,6 +96,115 @@ app.post('/leads/upload', upload.single("file"), async (req, res) => {
     catch (error) {
         console.error('Error parsing CSV file:', error);
         return res.status(500).json({ error: 'Error parsing CSV file' });
+    }
+});
+let results = [
+    {
+        name: "Ava Patel",
+        role: "Head of Growth",
+        company: "FlowMetrics",
+        intent: "High",
+        score: 85,
+        reasoning: "Fits ICP SaaS mid-market and role is decision maker."
+    },
+    {
+        name: "John Doe",
+        role: "CTO",
+        company: "TechNova",
+        intent: "Medium",
+        score: 70,
+        reasoning: "Relevant role but company size is smaller than ICP."
+    }
+];
+let leadResults = []; // to store the results after scoring
+// scoring logic
+function scoreLead(lead) {
+    let score = 0;
+    let reasons = []; // to collect explanation for each scoring
+    // 1 - Role relevance
+    if (/chief|head|director|vp/i.test(lead.role)) {
+        // if role contains these keywords -> decision maker
+        score += 20;
+        reasons.push("Role is a decision maker (+20).");
+    }
+    else if (/manager|lead|senior/i.test(lead.role)) {
+        // if role contains these keywords → influencer
+        score += 10;
+        reasons.push("Role is an influencer (+10).");
+    }
+    else {
+        reasons.push("Role has low decision influence (+0).");
+    }
+    // 2 - industry match
+    if (/saas|software|tech/i.test(lead.industry)) {
+        score += 20;
+        reasons.push("Industry is an exact ICP match (+20).");
+    }
+    else if (/marketing|consulting|services/i.test(lead.industry)) {
+        score += 10;
+        reasons.push("Industry is adjacent to ICP (+10).");
+    }
+    else {
+        reasons.push("Industry outside ICP (+0).");
+    }
+    // 3 - data completeness
+    const allFieldsPresent = lead.name && lead.role && lead.company && lead.industry && lead.location && lead.linkedin_bio;
+    if (allFieldsPresent) {
+        score += 10;
+        reasons.push("All fields complete (+10).");
+    }
+    else {
+        reasons.push("Missing fields, no completeness bonus (+0).");
+    }
+    // intent label according to score
+    let intent;
+    if (score >= 40) {
+        intent = "High";
+    }
+    else if (score >= 25) {
+        intent = "Medium";
+    }
+    else {
+        intent = "Low";
+    }
+    return {
+        name: lead.name,
+        role: lead.role,
+        company: lead.company,
+        intent,
+        score,
+        reasoning: reasons.join(" ")
+    };
+}
+;
+// transforms uploaded leads to results and runs the scoring logic
+app.post('/score', async (req, res) => {
+    if (uploadedLeads.length === 0) {
+        return res.status(400).json({ error: 'No leads uploaded to score. Upload CSV first' });
+    }
+    results = uploadedLeads.map((lead) => scoreLead(lead)); // score every lead
+    return res.status(200).json({
+        message: 'Scoring completed',
+        results
+    });
+});
+// GET - /results - returns the JSON array
+app.get('/results', async (req, res) => {
+    res.json(results);
+});
+// export results as a CSV file
+app.get('/results/export', async (req, res) => {
+    try {
+        const fields = ['name', 'role', 'company', 'intent', 'score', 'reasoning']; // fields to export
+        const parser = new json2csv_1.Parser({ fields }); // 
+        const csv = parser.parse(results); // convert JSON to CSV
+        res.setHeader('Content-Type', 'text/csv'); // set the content type to CSV
+        res.attachment('results.csv'); // attachment is the filename of the CSV file
+        res.status(200).send(csv); // send CSV to client
+    }
+    catch (error) {
+        console.error('Error exporting results:', error);
+        return res.status(500).json({ error: 'Error exporting results' });
     }
 });
 //# sourceMappingURL=index.js.map
