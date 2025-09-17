@@ -1,3 +1,5 @@
+# LIVE LINK : https://kuvaka-assignment-9cvz.onrender.com
+
 # Kuvaka Assignment - Lead Scoring Pipeline
 
 TypeScript + Express server with AI-powered lead scoring using rule-based and AI layers. Accepts offer details, processes CSV leads, and provides intent scoring.
@@ -9,27 +11,98 @@ TypeScript + Express server with AI-powered lead scoring using rule-based and AI
 
 ## Setup
 
-### 1. Install Dependencies
+### Option 1: Docker (Recommended)
+
+#### 1. Prerequisites
+- Docker and Docker Compose installed
+- Gemini API key
+
+#### 2. Environment Configuration
+Copy the example environment file:
+```bash
+cp env.example .env
+```
+
+Edit `.env` and add your Gemini API key:
+```bash
+GEMINI_API_KEY=your_gemini_api_key_here
+PORT=3000
+```
+
+#### 3. Build and Run with Docker
+```bash
+# Build and start the application
+docker-compose up --build
+
+# Or run in detached mode
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the application
+docker-compose down
+```
+
+**Access the application:**
+- Direct: http://localhost:3000
+- With nginx (production): http://localhost:80
+
+#### 4. Production Deployment with Nginx
+```bash
+# Start with nginx reverse proxy
+docker-compose --profile production up --build -d
+```
+
+### Option 2: Local Development
+
+#### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Environment Configuration
+#### 2. Environment Configuration
 Create `.env` file in project root:
 ```bash
 GEMINI_API_KEY=your_gemini_api_key_here
 PORT=3000
 ```
 
-### 3. Start Server
+#### 3. Start Server
 ```bash
 npm run start
 # Server: http://localhost:3000
 ```
 
 ## Scripts
+
+### Local Development
 - `npm run build` — compile TypeScript to `dist/`
 - `npm run start` — build then run `node dist/index.js`
+
+### Docker Commands
+```bash
+# Build Docker image
+docker build -t kuvaka-assignment .
+
+# Run container
+docker run -p 3000:3000 --env-file .env kuvaka-assignment
+
+# Run with Docker Compose
+docker-compose up --build
+
+# Stop and remove containers
+docker-compose down
+
+# View container logs
+docker-compose logs -f kuvaka-app
+
+# Rebuild without cache
+docker-compose build --no-cache
+
+# Remove all containers and volumes
+docker-compose down -v
+```
 
 ## API Workflow (Proper Order)
 
