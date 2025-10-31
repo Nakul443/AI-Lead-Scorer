@@ -1,6 +1,6 @@
 # LIVE LINK : https://kuvaka-assignment-9cvz.onrender.com
 
-# Kuvaka Assignment - Lead Scoring Pipeline
+# Lead Scoring Pipeline
 
 TypeScript + Express server with AI-powered lead scoring using rule-based and AI layers. Accepts offer details, processes CSV leads, and provides intent scoring.
 
